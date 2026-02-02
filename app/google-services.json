@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "487168248961",
+    "firebase_url": "https://smartattendance-e0cc2-default-rtdb.firebaseio.com",
+    "project_id": "smartattendance-e0cc2",
+    "storage_bucket": "smartattendance-e0cc2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:487168248961:android:1143a3a88fd55159e55180",
+        "android_client_info": {
+          "package_name": "com.example.smartattendance"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBXQo4oonXZ1ddkTmgDH_5BLm8_LVsvark"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:487168248961:android:7c70538b33fbb0a8e55180",
+        "android_client_info": {
+          "package_name": "com.qron.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBXQo4oonXZ1ddkTmgDH_5BLm8_LVsvark"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
