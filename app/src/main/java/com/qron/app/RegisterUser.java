@@ -85,54 +85,29 @@ public class RegisterUser extends AppCompatActivity {
             spinnerSemester.setVisibility(View.GONE);
         }
 
-        registerBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                final String fullName = regFullName.getText().toString().trim();
-                final String email = regEmail.getText().toString().trim();
-                String password = regPassword.getText().toString().trim();
-                final String phone = regPhone.getText().toString().trim();
-                final String regNo = regRegNo.getText().toString().trim();
-                final String selectedCourse = spinnerCourse.getSelectedItem() != null ? spinnerCourse.getSelectedItem().toString().trim() : "";
-                final String selectedSemester = spinnerSemester.getSelectedItem() != null ? spinnerSemester.getSelectedItem().toString().trim() : "";
+        registerBtn.setOnClickListener(v -> {
+            String name = regFullName.getText().toString().trim();
+            String email = regEmail.getText().toString().trim();
+            String pass = regPassword.getText().toString().trim();
+            String phone = regPhone.getText().toString().trim();
+            String regNo = regRegNo.getText().toString().trim();
+            String course = spinnerCourse.getSelectedItem() != null ? spinnerCourse.getSelectedItem().toString() : "";
+            String sem = spinnerSemester.getSelectedItem() != null ? spinnerSemester.getSelectedItem().toString() : "";
 
-                if (TextUtils.isEmpty(fullName)) {
-                    regFullName.setError("Full Name is required.");
-                    return;
-                }
-                if ("Student".equalsIgnoreCase(role) && TextUtils.isEmpty(regNo)) {
-                    regRegNo.setError("Registration Number is required.");
-                    return;
-                }
-                if (TextUtils.isEmpty(email)) {
-                    regEmail.setError("Email is required.");
-                    return;
-                }
-                if (TextUtils.isEmpty(password)) {
-                    regPassword.setError("Password is required.");
-                    return;
-                }
-                if (password.length() < 6) {
-                    regPassword.setError("Password must be at least 6 characters.");
-                    return;
-                }
-
-                if ("Student".equalsIgnoreCase(role)) {
-                    if (spinnerCourse.getSelectedItemPosition() <= 0) {
-                        Toast.makeText(RegisterUser.this, "Please select a Course", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    if (spinnerSemester.getSelectedItemPosition() <= 0) {
-                        Toast.makeText(RegisterUser.this, "Please select a Semester", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                }
-
-                progressBar.setVisibility(View.VISIBLE);
-                progressBar.setIndeterminate(true);
-
-                createAccount(fullName, email, password, phone, regNo, selectedCourse, selectedSemester);
+            if (TextUtils.isEmpty(name) || TextUtils.isEmpty(email) || TextUtils.isEmpty(pass)) {
+                Toast.makeText(this, "Please fill required fields", Toast.LENGTH_SHORT).show();
+                return;
             }
+            if ("Student".equalsIgnoreCase(role)) {
+                if (TextUtils.isEmpty(regNo) || spinnerCourse.getSelectedItemPosition() <= 0 || spinnerSemester.getSelectedItemPosition() <= 0) {
+                    Toast.makeText(this, "Complete details required", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+            }
+
+            progressBar.setVisibility(View.VISIBLE);
+            progressBar.setIndeterminate(true);
+            createAccount(name, email, pass, phone, regNo, course, sem);
         });
 
         btnBulkUpload.setOnClickListener(v -> {
@@ -148,73 +123,62 @@ public class RegisterUser extends AppCompatActivity {
         });
     }
 
-    private void createAccount(String fullName, String email, String password, String phone, String regNo, String selectedCourse, String selectedSemester) {
-        FirebaseApp secondaryApp;
+    private void createAccount(String name, String email, String pass, String phone, String regNo, String course, String sem) {
+        FirebaseAuth tempAuth = FirebaseAuth.getInstance(getSecondaryApp());
+        tempAuth.createUserWithEmailAndPassword(email, pass).addOnSuccessListener(result -> {
+            String uid = result.getUser().getUid();
+            Map<String, Object> user = new HashMap<>();
+            user.put("fullName", name);
+            user.put("email", email);
+            user.put("phone", phone);
+            user.put("role", role);
+
+            if ("Student".equalsIgnoreCase(role)) {
+                user.put("course", course);
+                user.put("semester", sem);
+                user.put("regNo", regNo);
+            }
+
+            fStore.collection("users").document(uid).set(user).addOnSuccessListener(aVoid -> {
+                if (tvProgress.getVisibility() != View.VISIBLE) {
+                    Toast.makeText(this, getString(R.string.registered_successfully), Toast.LENGTH_SHORT).show();
+                    clearFields();
+                }
+                tempAuth.signOut();
+                if (tvProgress.getVisibility() != View.VISIBLE) progressBar.setVisibility(View.GONE);
+            }).addOnFailureListener(e -> {
+                Toast.makeText(this, "Firestore Error: " + e.getLocalizedMessage(), Toast.LENGTH_SHORT).show();
+                progressBar.setVisibility(View.GONE);
+            });
+        }).addOnFailureListener(e -> {
+            Toast.makeText(this, "Auth Failed: " + e.getLocalizedMessage(), Toast.LENGTH_SHORT).show();
+            progressBar.setVisibility(View.GONE);
+        });
+    }
+
+    private void clearFields() {
+        regFullName.setText("");
+        regRegNo.setText("");
+        regEmail.setText("");
+        regPassword.setText("");
+        regPhone.setText("");
+        if ("Student".equalsIgnoreCase(role)) {
+            spinnerCourse.setSelection(0);
+            spinnerSemester.setSelection(0);
+        }
+    }
+
+    private FirebaseApp getSecondaryApp() {
         try {
-            secondaryApp = FirebaseApp.getInstance("Secondary");
+            return FirebaseApp.getInstance("Secondary");
         } catch (IllegalStateException e) {
-            FirebaseOptions options = new FirebaseOptions.Builder()
+            FirebaseOptions opt = new FirebaseOptions.Builder()
                     .setApiKey("AIzaSyBXQo4oonXZ1ddkTmgDH_5BLm8_LVsvark")
                     .setApplicationId("1:487168248961:android:1143a3a88fd55159e55180")
                     .setProjectId("smartattendance-e0cc2")
                     .build();
-            secondaryApp = FirebaseApp.initializeApp(getApplicationContext(), options, "Secondary");
+            return FirebaseApp.initializeApp(this, opt, "Secondary");
         }
-
-        FirebaseAuth tempAuth = FirebaseAuth.getInstance(secondaryApp);
-
-        tempAuth.createUserWithEmailAndPassword(email, password).addOnSuccessListener(new OnSuccessListener<AuthResult>() {
-            @Override
-            public void onSuccess(AuthResult authResult) {
-                String uid = authResult.getUser().getUid();
-                DocumentReference df = fStore.collection("users").document(uid);
-                Map<String, Object> userInfo = new HashMap<>();
-                userInfo.put("fullName", fullName);
-                userInfo.put("email", email);
-                userInfo.put("phone", phone);
-                userInfo.put("role", role);
-
-                if ("Student".equalsIgnoreCase(role)) {
-                    userInfo.put("course", selectedCourse);
-                    userInfo.put("semester", selectedSemester);
-                    userInfo.put("regNo", regNo);
-                }
-
-                df.set(userInfo).addOnSuccessListener(new OnSuccessListener<Void>() {
-                    @Override
-                    public void onSuccess(Void unused) {
-                        if (tvProgress.getVisibility() != View.VISIBLE) {
-                            Toast.makeText(RegisterUser.this, "User Created Successfully", Toast.LENGTH_SHORT).show();
-                            regFullName.setText("");
-                            regRegNo.setText("");
-                            regEmail.setText("");
-                            regPassword.setText("");
-                            regPhone.setText("");
-                            if ("Student".equalsIgnoreCase(role)) {
-                                spinnerCourse.setSelection(0);
-                                spinnerSemester.setSelection(0);
-                            }
-                        }
-                        tempAuth.signOut();
-                        if (tvProgress.getVisibility() != View.VISIBLE) {
-                            progressBar.setVisibility(View.GONE);
-                        }
-                    }
-                }).addOnFailureListener(new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
-                        Toast.makeText(RegisterUser.this, "Failed to create Firestore entry: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                        progressBar.setVisibility(View.GONE);
-                    }
-                });
-            }
-        }).addOnFailureListener(new OnFailureListener() {
-            @Override
-            public void onFailure(@NonNull Exception e) {
-                Toast.makeText(RegisterUser.this, "Failed to create account: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                progressBar.setVisibility(View.GONE);
-            }
-        });
     }
 
     @Override
@@ -275,42 +239,31 @@ public class RegisterUser extends AppCompatActivity {
             String regNo = row[1].trim();
             String email = row[2].trim();
             String mobile = row[3].trim();
-            String password = row[4].trim();
+            String pass = row[4].trim();
 
-            FirebaseApp secondaryApp;
-            try {
-                secondaryApp = FirebaseApp.getInstance("Secondary");
-            } catch (IllegalStateException e) {
-                FirebaseOptions options = new FirebaseOptions.Builder()
-                        .setApiKey("AIzaSyBXQo4oonXZ1ddkTmgDH_5BLm8_LVsvark")
-                        .setApplicationId("1:487168248961:android:1143a3a88fd55159e55180")
-                        .setProjectId("smartattendance-e0cc2")
-                        .build();
-                secondaryApp = FirebaseApp.initializeApp(getApplicationContext(), options, "Secondary");
-            }
-            FirebaseAuth tempAuth = FirebaseAuth.getInstance(secondaryApp);
+            FirebaseAuth tempAuth = FirebaseAuth.getInstance(getSecondaryApp());
 
-            tempAuth.createUserWithEmailAndPassword(email, password).addOnSuccessListener(authResult -> {
+            tempAuth.createUserWithEmailAndPassword(email, pass).addOnSuccessListener(authResult -> {
                 String uid = authResult.getUser().getUid();
-                Map<String, Object> userInfo = new HashMap<>();
-                userInfo.put("fullName", name);
-                userInfo.put("email", email);
-                userInfo.put("phone", mobile);
-                userInfo.put("role", role); // Dynamic based on current role (Student or Teacher)
+                Map<String, Object> user = new HashMap<>();
+                user.put("fullName", name);
+                user.put("email", email);
+                user.put("phone", mobile);
+                user.put("role", role);
 
                 if ("Student".equalsIgnoreCase(role)) {
-                    userInfo.put("course", selectedCourse);
-                    userInfo.put("semester", selectedSemester);
-                    userInfo.put("regNo", regNo);
+                    user.put("course", selectedCourse);
+                    user.put("semester", selectedSemester);
+                    user.put("regNo", regNo);
                 }
 
-                fStore.collection("users").document(uid).set(userInfo).addOnCompleteListener(task -> {
-                    int current = completedCount.incrementAndGet();
-                    progressBar.setProgress(current);
-                    tvProgress.setText("Uploading: " + current + "/" + total);
+                fStore.collection("users").document(uid).set(user).addOnCompleteListener(tk -> {
+                    int curr = completedCount.incrementAndGet();
+                    progressBar.setProgress(curr);
+                    tvProgress.setText(getString(R.string.syncing_progress, curr, total));
                     tempAuth.signOut();
-                    if (current == total) {
-                        Toast.makeText(RegisterUser.this, "Bulk upload completed successfully!", Toast.LENGTH_LONG).show();
+                    if (curr == total) {
+                        Toast.makeText(this, "Bulk upload completed!", Toast.LENGTH_LONG).show();
                         tvProgress.setVisibility(View.GONE);
                         progressBar.setVisibility(View.GONE);
                     }

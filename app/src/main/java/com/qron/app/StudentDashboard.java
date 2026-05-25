@@ -8,6 +8,8 @@ import android.graphics.Color;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
@@ -17,7 +19,6 @@ import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ImageButton;
-import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -25,8 +26,8 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
+import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
-
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.Priority;
@@ -55,12 +56,13 @@ import java.util.Map;
 public class StudentDashboard extends AppCompatActivity {
 
     private static final int LOCATION_REQ_CODE = 123;
-    private static final float MAX_ALLOWED_DISTANCE = 100.0f; 
+    private static final float MAX_ALLOWED_DISTANCE = 100.0f;
     private static final String TAG = "StudentDashboard";
-    TextView txtStudentName, txtStatus, tvConnectionStatus;
-    Button btnScanQR, btnStudentLogout;
+    TextView txtStudentName, txtStatus;
+    Button btnScanQR;
     ImageButton btnProfile;
-    ListView attendanceList;
+    RecyclerView attendanceRecyclerView;
+    StudentSubjectAdapter subjectAdapter;
     SwipeRefreshLayout swipeRefresh;
     FusedLocationProviderClient fusedLocationClient;
     FirebaseAuth fAuth;
@@ -75,18 +77,14 @@ public class StudentDashboard extends AppCompatActivity {
 
         txtStudentName = findViewById(R.id.txtStudentName);
         txtStatus = findViewById(R.id.txtStatus);
-        tvConnectionStatus = findViewById(R.id.tvConnectionStatus);
         btnScanQR = findViewById(R.id.btnScanQR);
-        btnStudentLogout = findViewById(R.id.btnStudentLogout);
         btnProfile = findViewById(R.id.btnProfile);
-        attendanceList = findViewById(R.id.attendanceList);
+        attendanceRecyclerView = findViewById(R.id.attendanceRecyclerView);
         swipeRefresh = findViewById(R.id.swipeRefresh);
 
         fAuth = FirebaseAuth.getInstance();
         fStore = FirebaseFirestore.getInstance();
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
-
-        setupConnectionStatusListener();
 
         swipeRefresh.setColorSchemeResources(R.color.colorPrimary);
         swipeRefresh.setOnRefreshListener(() -> {
@@ -96,7 +94,7 @@ public class StudentDashboard extends AppCompatActivity {
 
         btnScanQR.setOnClickListener(v -> {
             if (myCourse == null || mySemester == null) {
-                Toast.makeText(StudentDashboard.this, "Profile incomplete. Please contact Admin.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(StudentDashboard.this, getString(R.string.profile_incomplete), Toast.LENGTH_SHORT).show();
                 return;
             }
             startScanning();
@@ -104,39 +102,7 @@ public class StudentDashboard extends AppCompatActivity {
 
         btnProfile.setOnClickListener(v -> startActivity(new Intent(StudentDashboard.this, ProfileActivity.class)));
 
-        btnStudentLogout.setOnClickListener(v -> {
-            FirebaseUser user = fAuth.getCurrentUser();
-            String email = (user != null) ? user.getEmail() : "Unknown";
-            SheetLogger.logToSheet(email, "Logout", "Student logged out");
-
-            fAuth.signOut();
-            Intent intent = new Intent(StudentDashboard.this, Login.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            startActivity(intent);
-            finish();
-        });
-    }
-
-    private void setupConnectionStatusListener() {
-        DatabaseReference connectedRef = FirebaseDatabase.getInstance().getReference(".info/connected");
-        connectedRef.addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot snapshot) {
-                boolean connected = snapshot.getValue(Boolean.class);
-                if (connected) {
-                    tvConnectionStatus.setText("🟢 Online");
-                    tvConnectionStatus.setBackgroundColor(Color.parseColor("#4CAF50"));
-                } else {
-                    tvConnectionStatus.setText("🔴 Offline (Data Saved Locally)");
-                    tvConnectionStatus.setBackgroundColor(Color.parseColor("#F44336"));
-                }
-            }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                Log.w(TAG, "Listener cancelled");
-            }
-        });
+        loadData();
     }
 
     @Override
@@ -146,22 +112,20 @@ public class StudentDashboard extends AppCompatActivity {
     }
 
     private void loadData() {
-        fetchStudentProfile();
-    }
+        FirebaseUser currentUser = fAuth.getCurrentUser();
+        if (currentUser == null) return;
 
-    private void fetchStudentProfile() {
-        String uid = fAuth.getCurrentUser().getUid();
-        DocumentReference df = fStore.collection("users").document(uid);
-        df.get().addOnSuccessListener(documentSnapshot -> {
-            if (documentSnapshot.exists()) {
-                studentName = documentSnapshot.getString("fullName");
-                myCourse = documentSnapshot.getString("course");
-                mySemester = documentSnapshot.getString("semester");
-                txtStudentName.setText("Welcome, " + studentName);
-                
-                loadAttendanceSummary();
-            }
-        });
+        fStore.collection("users").document(currentUser.getUid())
+                .get()
+                .addOnSuccessListener(doc -> {
+                    if (doc.exists()) {
+                        studentName = doc.getString("fullName");
+                        myCourse = doc.getString("course");
+                        mySemester = doc.getString("semester");
+                        txtStudentName.setText(getString(R.string.welcome) + ", " + studentName);
+                        loadAttendanceSummary();
+                    }
+                });
     }
 
     private void loadAttendanceSummary() {
@@ -200,23 +164,25 @@ public class StudentDashboard extends AppCompatActivity {
     }
 
     private void displaySummary(Map<String, Integer> totalMap, Map<String, Integer> attendedMap) {
-        List<AttendanceItem> summaryList = new ArrayList<>();
-        
+        List<StudentSubjectAdapter.AttendanceItem> summaryList = new ArrayList<>();
+
         for (String subject : totalMap.keySet()) {
             int total = totalMap.get(subject);
             int attended = attendedMap.getOrDefault(subject, 0);
-            double percentage = ((double) attended / total) * 100;
-            
-            summaryList.add(new AttendanceItem(subject, String.format(Locale.getDefault(), "%.1f%%", percentage)));
+            summaryList.add(new StudentSubjectAdapter.AttendanceItem(subject, attended, total));
         }
 
-        AttendanceAdapter adapter = new AttendanceAdapter(this, summaryList);
-        attendanceList.setAdapter(adapter);
+        if (subjectAdapter == null) {
+            subjectAdapter = new StudentSubjectAdapter(summaryList);
+            attendanceRecyclerView.setAdapter(subjectAdapter);
+        } else {
+            subjectAdapter.setList(summaryList);
+        }
     }
 
     private void startScanning() {
         IntentIntegrator integrator = new IntentIntegrator(this);
-        integrator.setPrompt("Scan Attendance QR Code");
+        integrator.setPrompt(getString(R.string.scan_attendance));
         integrator.setOrientationLocked(true);
         integrator.setCaptureActivity(CaptureAct.class);
         integrator.initiateScan();
@@ -250,110 +216,96 @@ public class StudentDashboard extends AppCompatActivity {
         try {
             String[] parts = contents.split(",");
             if (parts.length < 4) {
-                Toast.makeText(this, "Invalid QR Code", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, getString(R.string.invalid_qr), Toast.LENGTH_SHORT).show();
                 return;
             }
 
             final String sessionId = parts[0];
             final double teacherLat = Double.parseDouble(parts[1]);
             final double teacherLon = Double.parseDouble(parts[2]);
+            
+            final String qrSubject = (parts.length > 4) ? parts[4] : "Unknown";
+            final String qrCourse = (parts.length > 5) ? parts[5] : null;
+            final String qrSemester = (parts.length > 6) ? parts[6] : null;
 
-            // For fully offline operation, we might not be able to fetch sessionDoc from server
-            // But Firestore persistence will try to get it from local cache if it was recently fetched.
             fStore.collection("class_sessions").document(sessionId).get()
                     .addOnCompleteListener(task -> {
-                        if (task.isSuccessful() && task.getResult() != null && task.getResult().exists()) {
-                            DocumentSnapshot sessionDoc = task.getResult();
-                            String sessionCourse = sessionDoc.getString("course");
-                            String sessionSemester = sessionDoc.getString("semester");
+                        if (task.isSuccessful() && task.getResult().exists()) {
+                            DocumentSnapshot doc = task.getResult();
+                            String course = doc.getString("course");
+                            String sem = doc.getString("semester");
 
-                            if (sessionCourse == null || sessionSemester == null || myCourse == null || mySemester == null ||
-                                    !sessionCourse.trim().equalsIgnoreCase(myCourse.trim()) ||
-                                    !sessionSemester.trim().equalsIgnoreCase(mySemester.trim())) {
-                                Toast.makeText(StudentDashboard.this, "Wrong Class! You belong to " + myCourse + " but this is " + sessionCourse + ".", Toast.LENGTH_LONG).show();
+                            if (course == null || !course.trim().equalsIgnoreCase(myCourse.trim()) ||
+                                sem == null || !sem.trim().equalsIgnoreCase(mySemester.trim())) {
+                                Toast.makeText(this, getString(R.string.wrong_class_expected, myCourse, mySemester), Toast.LENGTH_LONG).show();
                                 return;
                             }
 
-                            Long startTime = sessionDoc.getLong("startTime");
-                            Integer duration = sessionDoc.get("duration", Integer.class);
-                            if (duration == null) duration = 50; 
+                            Long start = doc.getLong("startTime");
+                            int duration = doc.get("duration", Integer.class) != null ? doc.get("duration", Integer.class) : 50;
 
-                            final String subject = sessionDoc.getString("subject");
-                            long currentTime = System.currentTimeMillis();
-
-                            if (startTime != null && (currentTime - startTime) <= (long) duration * 60 * 1000) {
-                                validateLocationAndMark(sessionId, subject, teacherLat, teacherLon);
+                            if (start != null && (System.currentTimeMillis() - start) <= (long) duration * 60 * 1000) {
+                                validateAndMark(sessionId, doc.getString("subject"), teacherLat, teacherLon, course, sem);
                             } else {
-                                Toast.makeText(StudentDashboard.this, "QR Expired! Class ended.", Toast.LENGTH_LONG).show();
+                                Toast.makeText(this, getString(R.string.qr_expired), Toast.LENGTH_LONG).show();
                             }
                         } else {
-                            // If we can't find the session (e.g., first time offline), 
-                            // we proceed if we trust the QR data for offline mode
-                            // or show a specific message.
-                            Log.d(TAG, "Session doc not found locally/online. Proceeding with QR info.");
-                            validateLocationAndMark(sessionId, "Unknown Subject", teacherLat, teacherLon);
+                            validateAndMark(sessionId, qrSubject, teacherLat, teacherLon, qrCourse, qrSemester);
                         }
                     });
 
         } catch (Exception e) {
-            Toast.makeText(this, "Error parsing QR: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, getString(R.string.scan_error, e.getLocalizedMessage()), Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void validateLocationAndMark(final String sessionId, final String subject, final double teacherLat, final double teacherLon) {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            return; 
-        }
+    private void validateAndMark(String sessionId, String subject, double tLat, double tLon, String course, String sem) {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
 
         fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, new CancellationTokenSource().getToken())
-                .addOnSuccessListener(studentLocation -> {
-                    if (studentLocation != null) {
-                        checkDistanceAndMark(studentLocation, teacherLat, teacherLon, sessionId, subject);
+                .addOnSuccessListener(loc -> {
+                    if (loc != null) {
+                        checkRange(loc, tLat, tLon, sessionId, subject, course, sem);
                     } else {
-                        // Fallback to LocationManager GPS_PROVIDER
-                        tryGPSProviderFallback(teacherLat, teacherLon, sessionId, subject);
+                        fallbackGPS(tLat, tLon, sessionId, subject, course, sem);
                     }
                 })
-                .addOnFailureListener(e -> {
-                    tryGPSProviderFallback(teacherLat, teacherLon, sessionId, subject);
-                });
+                .addOnFailureListener(e -> fallbackGPS(tLat, tLon, sessionId, subject, course, sem));
     }
 
-    private void tryGPSProviderFallback(double teacherLat, double teacherLon, String sessionId, String subject) {
-        LocationManager locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-        if (locationManager != null && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+    private void fallbackGPS(double tLat, double tLon, String sId, String sub, String c, String sem) {
+        LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (lm != null && lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                Location lastKnown = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-                if (lastKnown != null) {
-                    checkDistanceAndMark(lastKnown, teacherLat, teacherLon, sessionId, subject);
+                Location last = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+                if (last != null) {
+                    checkRange(last, tLat, tLon, sId, sub, c, sem);
                 } else {
-                    Toast.makeText(this, "Waiting for GPS signal...", Toast.LENGTH_SHORT).show();
-                    locationManager.requestSingleUpdate(LocationManager.GPS_PROVIDER, new LocationListener() {
+                    Toast.makeText(this, getString(R.string.waiting_gps), Toast.LENGTH_SHORT).show();
+                    lm.requestSingleUpdate(LocationManager.GPS_PROVIDER, new LocationListener() {
                         @Override
-                        public void onLocationChanged(@NonNull Location location) {
-                            checkDistanceAndMark(location, teacherLat, teacherLon, sessionId, subject);
+                        public void onLocationChanged(@NonNull Location l) {
+                            checkRange(l, tLat, tLon, sId, sub, c, sem);
                         }
-                        @Override public void onStatusChanged(String provider, int status, Bundle extras) {}
-                        @Override public void onProviderEnabled(@NonNull String provider) {}
-                        @Override public void onProviderDisabled(@NonNull String provider) {}
+                        @Override public void onStatusChanged(String p, int s, Bundle e) {}
+                        @Override public void onProviderEnabled(@NonNull String p) {}
+                        @Override public void onProviderDisabled(@NonNull String p) {}
                     }, null);
                 }
             }
         } else {
-            Toast.makeText(StudentDashboard.this, "Could not get your location. Please ensure GPS is ON.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, getString(R.string.gps_required), Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void checkDistanceAndMark(Location studentLocation, double teacherLat, double teacherLon, String sessionId, String subject) {
-        float[] results = new float[1];
-        Location.distanceBetween(teacherLat, teacherLon, studentLocation.getLatitude(), studentLocation.getLongitude(), results);
-        float distanceInMeters = results[0];
-
-        if (distanceInMeters <= MAX_ALLOWED_DISTANCE) {
-            checkDuplicateAndMark(sessionId, subject);
+    private void checkRange(Location sLoc, double tLat, double tLon, String sId, String sub, String c, String sem) {
+        float[] res = new float[1];
+        Location.distanceBetween(tLat, tLon, sLoc.getLatitude(), sLoc.getLongitude(), res);
+        if (res[0] <= MAX_ALLOWED_DISTANCE) {
+            checkDuplicateAndMark(sId, sub, c, sem);
         } else {
-            txtStatus.setText("Status: Too Far (" + (int)distanceInMeters + "m)");
-            Toast.makeText(StudentDashboard.this, "You are too far from the teacher! (" + (int)distanceInMeters + "m)", Toast.LENGTH_SHORT).show();
+            txtStatus.setText(getString(R.string.too_far) + " (" + (int)res[0] + "m)");
+            Toast.makeText(this, getString(R.string.too_far_distance, (int)res[0]), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -372,27 +324,24 @@ public class StudentDashboard extends AppCompatActivity {
         }
     }
 
-    private void checkDuplicateAndMark(final String sessionId, final String subject) {
+    private void checkDuplicateAndMark(final String sessionId, final String subject, final String sessionCourse, final String sessionSemester) {
         final String email = fAuth.getCurrentUser().getEmail();
         final String uid = fAuth.getCurrentUser().getUid();
 
-        // Use local-first logic for offline support
         fStore.collection("attendance")
                 .whereEqualTo("studentEmail", email)
                 .whereEqualTo("sessionId", sessionId)
                 .get()
                 .addOnCompleteListener(task -> {
                     if (task.isSuccessful() && task.getResult() != null && !task.getResult().isEmpty()) {
-                        Toast.makeText(StudentDashboard.this, "Attendance already marked for this session!", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(StudentDashboard.this, getString(R.string.attendance_already_marked), Toast.LENGTH_SHORT).show();
                     } else {
-                        // If offline, task might fail or return empty even if marked (if not synced yet)
-                        // But Firestore's internal persistence usually handles this.
-                        saveAttendanceData(sessionId, subject, uid, email);
+                        saveAttendanceData(sessionId, subject, uid, email, sessionCourse, sessionSemester);
                     }
                 });
     }
 
-    private void saveAttendanceData(String sessionId, String subject, String uid, String email) {
+    private void saveAttendanceData(String sessionId, String subject, String uid, String email, String sessionCourse, String sessionSemester) {
         long timestamp = System.currentTimeMillis();
         String date = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date(timestamp));
         String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date(timestamp));
@@ -401,55 +350,33 @@ public class StudentDashboard extends AppCompatActivity {
         attendance.put("studentName", studentName);
         attendance.put("studentId", uid);
         attendance.put("studentEmail", email);
-        attendance.put("subject", subject != null ? subject.trim() : "");
-        attendance.put("course", myCourse != null ? myCourse.trim() : "");
-        attendance.put("semester", mySemester != null ? mySemester.trim() : "");
+        attendance.put("subject", subject != null ? subject.trim() : "Unknown");
+        attendance.put("course", (sessionCourse != null) ? sessionCourse.trim() : (myCourse != null ? myCourse.trim() : ""));
+        attendance.put("semester", (sessionSemester != null) ? sessionSemester.trim() : (mySemester != null ? mySemester.trim() : ""));
         attendance.put("sessionId", sessionId);
         attendance.put("date", date);
         attendance.put("time", time);
         attendance.put("timestamp", timestamp);
         attendance.put("status", "Present");
 
-        // Save immediately (Firestore queues it if offline)
         fStore.collection("attendance").add(attendance);
-        
+
         txtStatus.setText("Status: Attendance Marked for " + subject);
-        Toast.makeText(StudentDashboard.this, "Attendance Marked Locally. Will sync when online.", Toast.LENGTH_LONG).show();
-        
+
+        if (NetworkUtils.isNetworkAvailable(this)) {
+            Toast.makeText(StudentDashboard.this, getString(R.string.attendance_marked) + " for " + subject, Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(StudentDashboard.this, getString(R.string.sync_offline), Toast.LENGTH_LONG).show();
+        }
+
         SheetLogger.logToSheet(email, "Scan Success", "Student scanned QR for " + subject + " (Session: " + sessionId + ")");
         loadAttendanceSummary();
     }
 
-    private static class AttendanceItem {
-        String subject;
-        String percentage;
-
-        AttendanceItem(String subject, String percentage) {
-            this.subject = subject;
-            this.percentage = percentage;
-        }
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
     }
 
-    private static class AttendanceAdapter extends ArrayAdapter<AttendanceItem> {
-        AttendanceAdapter(Context context, List<AttendanceItem> items) {
-            super(context, 0, items);
-        }
 
-        @NonNull
-        @Override
-        public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-            if (convertView == null) {
-                convertView = LayoutInflater.from(getContext()).inflate(R.layout.item_attendance_row, parent, false);
-            }
-            AttendanceItem item = getItem(position);
-            TextView tvSubject = convertView.findViewById(R.id.tvSubjectName);
-            TextView tvPercentage = convertView.findViewById(R.id.tvPercentageText);
-
-            if (item != null) {
-                tvSubject.setText(item.subject);
-                tvPercentage.setText(item.percentage);
-            }
-            return convertView;
-        }
-    }
 }

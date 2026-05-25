@@ -30,11 +30,6 @@ import com.google.android.gms.location.Priority;
 import com.google.android.gms.tasks.CancellationTokenSource;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
-import com.google.firebase.database.DataSnapshot;
-import com.google.firebase.database.DatabaseError;
-import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.database.FirebaseDatabase;
-import com.google.firebase.database.ValueEventListener;
 import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.FieldValue;
 import com.google.firebase.firestore.FirebaseFirestore;
@@ -56,8 +51,8 @@ public class TeacherDashboard extends AppCompatActivity {
 
     AutoCompleteTextView spinnerSubjects, spinnerCourse, spinnerSemester;
     ImageView qrImage;
-    TextView tvTimer, tvConnectionStatus;
-    Button btnGenerateQR, btnTeacherLogout, btnViewReports, btnManualAttendance;
+    TextView tvTimer;
+    Button btnGenerateQR, btnViewReports, btnManualAttendance;
     ImageButton btnProfile;
     SwipeRefreshLayout swipeRefresh;
     FusedLocationProviderClient fusedLocationClient;
@@ -80,9 +75,7 @@ public class TeacherDashboard extends AppCompatActivity {
             spinnerSemester = findViewById(R.id.spinnerSemester);
             qrImage = findViewById(R.id.qrImage);
             tvTimer = findViewById(R.id.tvTimer);
-            tvConnectionStatus = findViewById(R.id.tvConnectionStatus);
             btnGenerateQR = findViewById(R.id.btnGenerateQR);
-            btnTeacherLogout = findViewById(R.id.btnTeacherLogout);
             btnViewReports = findViewById(R.id.btnViewReports);
             btnProfile = findViewById(R.id.btnProfile);
             swipeRefresh = findViewById(R.id.swipeRefresh);
@@ -91,8 +84,6 @@ public class TeacherDashboard extends AppCompatActivity {
             fStore = FirebaseFirestore.getInstance();
             fAuth = FirebaseAuth.getInstance();
             fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
-
-            setupConnectionStatusListener();
 
             swipeRefresh.setColorSchemeResources(R.color.colorPrimary);
             swipeRefresh.setOnRefreshListener(() -> {
@@ -133,46 +124,9 @@ public class TeacherDashboard extends AppCompatActivity {
                 });
             }
 
-            if (btnTeacherLogout != null) {
-                btnTeacherLogout.setOnClickListener(v -> {
-                    FirebaseUser user = fAuth.getCurrentUser();
-                    String email = (user != null) ? user.getEmail() : "Unknown";
-                    SheetLogger.logToSheet(email, "Logout", "Teacher logged out");
-
-                    fAuth.signOut();
-                    Intent intent = new Intent(TeacherDashboard.this, Login.class);
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                    startActivity(intent);
-                    finish();
-                });
-            }
-
         } catch (Exception e) {
-            Log.e(TAG, "Initialization error: " + e.getMessage());
-            Toast.makeText(this, "Dashboard Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, getString(R.string.dashboard_error, e.getLocalizedMessage()), Toast.LENGTH_LONG).show();
         }
-    }
-
-    private void setupConnectionStatusListener() {
-        DatabaseReference connectedRef = FirebaseDatabase.getInstance().getReference(".info/connected");
-        connectedRef.addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot snapshot) {
-                boolean connected = snapshot.getValue(Boolean.class);
-                if (connected) {
-                    tvConnectionStatus.setText("🟢 Online");
-                    tvConnectionStatus.setBackgroundColor(Color.parseColor("#4CAF50"));
-                } else {
-                    tvConnectionStatus.setText("🔴 Offline (Data Saved Locally)");
-                    tvConnectionStatus.setBackgroundColor(Color.parseColor("#F44336"));
-                }
-            }
-
-            @Override
-            public void onCancelled(@NonNull DatabaseError error) {
-                Log.w(TAG, "Listener cancelled");
-            }
-        });
     }
 
     private void showDurationSelectionDialog() {
@@ -240,12 +194,11 @@ public class TeacherDashboard extends AppCompatActivity {
     private void updateSubjectSpinner(String course, String semester) {
         fStore.collection("Curriculum").document("Subjects")
                 .collection(course).document(semester).get()
-                .addOnSuccessListener(documentSnapshot -> {
-                    if (documentSnapshot.exists()) {
-                        List<String> subjects = (List<String>) documentSnapshot.get("subjects");
+                .addOnSuccessListener(doc -> {
+                    if (doc.exists()) {
+                        List<String> subjects = (List<String>) doc.get("subjects");
                         if (subjects != null) {
-                            ArrayAdapter<String> subjectAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, subjects);
-                            spinnerSubjects.setAdapter(subjectAdapter);
+                            spinnerSubjects.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, subjects));
                             spinnerSubjects.setText("", false);
                             btnManualAttendance.setVisibility(View.GONE);
                         }
@@ -279,85 +232,84 @@ public class TeacherDashboard extends AppCompatActivity {
         }
 
         fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, new CancellationTokenSource().getToken())
-                .addOnSuccessListener(this, location -> {
-                    if (location != null) {
-                        checkActiveSessionAndHandleQR(location.getLatitude(), location.getLongitude(), duration);
+                .addOnSuccessListener(this, loc -> {
+                    if (loc != null) {
+                        checkSession(loc.getLatitude(), loc.getLongitude(), duration);
                     } else {
-                        Toast.makeText(TeacherDashboard.this, "Location null. Check GPS.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "Location error. Check GPS.", Toast.LENGTH_SHORT).show();
                     }
                 });
     }
 
-    private void checkActiveSessionAndHandleQR(final double latitude, final double longitude, int duration) {
-        final String subject = spinnerSubjects.getText().toString();
+    private void checkSession(final double lat, final double lon, int duration) {
+        final String sub = spinnerSubjects.getText().toString();
         final String course = spinnerCourse.getText().toString();
-        final String semester = spinnerSemester.getText().toString();
-        final String activeSessionDocId = (course + "_" + semester + "_" + subject).replace(" ", "_");
+        final String sem = spinnerSemester.getText().toString();
+        final String sessionId = (course + "_" + sem + "_" + sub).replace(" ", "_");
 
-        fStore.collection("ActiveSessions").document(activeSessionDocId).get()
-                .addOnSuccessListener(documentSnapshot -> {
-                    if (documentSnapshot.exists()) {
-                        Long savedTime = documentSnapshot.getLong("timestamp");
-                        Integer savedDuration = documentSnapshot.get("duration", Integer.class);
-                        if (savedDuration == null) savedDuration = 50; 
+        fStore.collection("ActiveSessions").document(sessionId).get()
+                .addOnSuccessListener(doc -> {
+                    if (doc.exists()) {
+                        Long savedTime = doc.getLong("timestamp");
+                        int dur = doc.get("duration", Integer.class) != null ? doc.get("duration", Integer.class) : 50;
 
                         if (savedTime != null) {
-                            long diffMillis = System.currentTimeMillis() - savedTime;
-                            long durationMillis = (long) savedDuration * 60 * 1000;
+                            long diff = System.currentTimeMillis() - savedTime;
+                            long max = (long) dur * 60 * 1000;
                             
-                            if (diffMillis < durationMillis) {
-                                String savedQrData = documentSnapshot.getString("qrData");
-                                if (savedQrData != null) {
-                                    Toast.makeText(this, "Active session exists! Showing existing QR.", Toast.LENGTH_SHORT).show();
-                                    currentSessionId = savedQrData.split(",")[0];
+                            if (diff < max) {
+                                String qrData = doc.getString("qrData");
+                                if (qrData != null && qrData.split(",").length >= 7) {
+                                    Toast.makeText(this, getString(R.string.session_active), Toast.LENGTH_SHORT).show();
+                                    currentSessionId = qrData.split(",")[0];
                                     btnManualAttendance.setVisibility(View.VISIBLE);
-                                    displayQRCode(savedQrData);
-                                    startTimer(durationMillis - diffMillis);
+                                    displayQRCode(qrData);
+                                    startTimer(max - diff);
                                     return;
                                 }
                             }
                         }
                     }
-                    createNewSession(course, semester, subject, latitude, longitude, activeSessionDocId, duration);
+                    createSession(course, sem, sub, lat, lon, sessionId, duration);
                 });
     }
 
-    private void createNewSession(String course, String semester, String subject, double lat, double lon, String activeSessionId, int duration) {
+    private void createSession(String course, String sem, String sub, double lat, double lon, String activeId, int dur) {
         final String teacherEmail = fAuth.getCurrentUser().getEmail();
-        long startTime = System.currentTimeMillis();
-        String dateStr = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date(startTime));
+        long now = System.currentTimeMillis();
+        String dateStr = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date(now));
         
         Map<String, Object> session = new HashMap<>();
-        session.put("subject", subject);
+        session.put("subject", sub);
         session.put("course", course);
-        session.put("semester", semester);
+        session.put("semester", sem);
         session.put("teacherEmail", teacherEmail);
-        session.put("startTime", startTime);
+        session.put("startTime", now);
         session.put("date", dateStr); 
-        session.put("duration", duration);
+        session.put("duration", dur);
         session.put("timestamp", FieldValue.serverTimestamp());
 
-        // Offline logic: Get doc ID immediately
         DocumentReference sessionRef = fStore.collection("class_sessions").document();
         currentSessionId = sessionRef.getId();
-        sessionRef.set(session); // Will be queued locally if offline
+        sessionRef.set(session); 
 
-        long timestamp = System.currentTimeMillis() / 1000;
-        String qrData = currentSessionId + "," + lat + "," + lon + "," + timestamp;
+        String qr = currentSessionId + "," + lat + "," + lon + "," + (now / 1000) + "," + sub + "," + course + "," + sem;
 
-        Map<String, Object> activeSession = new HashMap<>();
-        activeSession.put("qrData", qrData);
-        activeSession.put("timestamp", System.currentTimeMillis());
-        activeSession.put("duration", duration);
+        Map<String, Object> active = new HashMap<>();
+        active.put("qrData", qr);
+        active.put("timestamp", now);
+        active.put("duration", dur);
         
-        fStore.collection("ActiveSessions").document(activeSessionId).set(activeSession);
+        fStore.collection("ActiveSessions").document(activeId).set(active);
         
         btnManualAttendance.setVisibility(View.VISIBLE);
-        displayQRCode(qrData);
-        startTimer((long) duration * 60 * 1000);
+        displayQRCode(qr);
+        startTimer((long) dur * 60 * 1000);
         
-        Toast.makeText(this, "QR Generated. Data will sync when online.", Toast.LENGTH_LONG).show();
-        SheetLogger.logToSheet(teacherEmail, "Generate QR", "Teacher generated session ID: " + currentSessionId + " for " + subject + " (" + course + ")");
+        Toast.makeText(this, NetworkUtils.isNetworkAvailable(this) ? 
+                getString(R.string.qr_gen_success) : getString(R.string.gen_offline), Toast.LENGTH_SHORT).show();
+
+        SheetLogger.logToSheet(teacherEmail, "Generate QR", "Session: " + currentSessionId + " [" + sub + "]");
     }
 
     private void startTimer(long durationMillis) {

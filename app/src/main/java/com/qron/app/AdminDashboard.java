@@ -35,7 +35,7 @@ public class AdminDashboard extends AppCompatActivity {
         swipeRefresh.setColorSchemeResources(R.color.colorPrimary);
         swipeRefresh.setOnRefreshListener(() -> {
             loadData();
-            new Handler().postDelayed(() -> swipeRefresh.setRefreshing(false), 2000);
+            new Handler().postDelayed(() -> swipeRefresh.setRefreshing(false), 1000);
         });
 
         btnAddTeacher.setOnClickListener(v -> {

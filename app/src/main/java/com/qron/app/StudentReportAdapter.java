@@ -39,9 +39,9 @@ public class StudentReportAdapter extends RecyclerView.Adapter<StudentReportAdap
     private void fetchCurrentUserRole() {
         String uid = FirebaseAuth.getInstance().getUid();
         if (uid != null) {
-            fStore.collection("users").document(uid).get().addOnSuccessListener(documentSnapshot -> {
-                if (documentSnapshot.exists()) {
-                    currentUserRole = documentSnapshot.getString("role");
+            fStore.collection("users").document(uid).get().addOnSuccessListener(doc -> {
+                if (doc.exists()) {
+                    currentUserRole = doc.getString("role");
                     notifyDataSetChanged();
                 }
             });
@@ -87,11 +87,17 @@ public class StudentReportAdapter extends RecyclerView.Adapter<StudentReportAdap
 
         if ("Teacher".equals(role)) {
             holder.txtAttendanceSummary.setText("Role: Teacher");
-            holder.btnResetDevice.setVisibility(View.GONE);
-            holder.btnEditUser.setVisibility(View.GONE);
-            holder.btnDeleteUser.setVisibility(View.GONE);
+            if ("Admin".equals(currentUserRole)) {
+                holder.btnResetDevice.setVisibility(View.GONE); // Disabled for teachers
+                holder.btnEditUser.setVisibility(View.VISIBLE);
+                holder.btnDeleteUser.setVisibility(View.VISIBLE);
+            } else {
+                holder.btnResetDevice.setVisibility(View.GONE);
+                holder.btnEditUser.setVisibility(View.GONE);
+                holder.btnDeleteUser.setVisibility(View.GONE);
+            }
         } else {
-            // Role-based visibility for management buttons
+            // Role-based visibility for management buttons for Students
             if ("Admin".equals(currentUserRole)) {
                 holder.btnResetDevice.setVisibility(View.VISIBLE);
                 holder.btnEditUser.setVisibility(View.VISIBLE);
@@ -117,24 +123,27 @@ public class StudentReportAdapter extends RecyclerView.Adapter<StudentReportAdap
 
         holder.btnResetDevice.setOnClickListener(v -> showResetDialog(v.getContext(), userId, name));
         holder.btnEditUser.setOnClickListener(v -> showEditDialog(v.getContext(), user, position));
-        holder.btnDeleteUser.setOnClickListener(v -> showDeleteDialog(v.getContext(), userId, name, position));
+        holder.btnDeleteUser.setOnClickListener(v -> showDeleteDialog(v.getContext(), user, position));
     }
 
-    private void showDeleteDialog(Context context, String userId, String name, int position) {
+    private void showDeleteDialog(Context context, Map<String, Object> user, int position) {
+        String role = (String) user.get("role");
+        String name = (String) user.get("fullName");
+        String userId = (String) user.get("userId");
+
         new AlertDialog.Builder(context)
-                .setTitle("Delete Student?")
+                .setTitle("Delete " + role + "?")
                 .setMessage("Are you sure you want to delete " + name + "? This cannot be undone.")
                 .setPositiveButton("Yes, Delete", (dialog, which) -> {
                     if (userId != null) {
                         fStore.collection("users").document(userId)
                                 .delete()
                                 .addOnSuccessListener(unused -> {
-                                    Toast.makeText(context, "Student Deleted Successfully", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(context, role + " Deleted Successfully", Toast.LENGTH_SHORT).show();
                                     
                                     String adminEmail = FirebaseAuth.getInstance().getCurrentUser() != null ? FirebaseAuth.getInstance().getCurrentUser().getEmail() : "Unknown";
-                                    Map<String, Object> user = userList.get(position);
                                     String regNo = (String) user.get("regNo");
-                                    SheetLogger.logToSheet(adminEmail, "Student Deleted", "Removed " + name + " (RegNo: " + (regNo != null ? regNo : "N/A") + ")");
+                                    SheetLogger.logToSheet(adminEmail, role + " Deleted", "Removed " + name + (regNo != null ? " (" + regNo + ")" : ""));
 
                                     userList.remove(position);
                                     notifyItemRemoved(position);
@@ -148,8 +157,9 @@ public class StudentReportAdapter extends RecyclerView.Adapter<StudentReportAdap
     }
 
     private void showEditDialog(Context context, Map<String, Object> user, int position) {
+        String role = (String) user.get("role");
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("Edit Student Details");
+        builder.setTitle("Edit " + role + " Details");
 
         LinearLayout layout = new LinearLayout(context);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -162,8 +172,10 @@ public class StudentReportAdapter extends RecyclerView.Adapter<StudentReportAdap
 
         final EditText editRegNo = new EditText(context);
         editRegNo.setHint("Registration Number");
-        editRegNo.setText((String) user.get("regNo"));
-        layout.addView(editRegNo);
+        if ("Student".equalsIgnoreCase(role)) {
+            editRegNo.setText((String) user.get("regNo"));
+            layout.addView(editRegNo);
+        }
 
         final EditText editPhone = new EditText(context);
         editPhone.setHint("Mobile Number");
@@ -178,24 +190,28 @@ public class StudentReportAdapter extends RecyclerView.Adapter<StudentReportAdap
             String newPhone = editPhone.getText().toString();
             String userId = (String) user.get("userId");
 
-            if (!TextUtils.isEmpty(newName) && !TextUtils.isEmpty(newRegNo)) {
+            if (!TextUtils.isEmpty(newName)) {
                 Map<String, Object> updates = new HashMap<>();
                 updates.put("fullName", newName);
-                updates.put("regNo", newRegNo);
+                if ("Student".equalsIgnoreCase(role)) {
+                    updates.put("regNo", newRegNo);
+                }
                 updates.put("phone", newPhone);
 
                 fStore.collection("users").document(userId)
                         .update(updates)
                         .addOnSuccessListener(unused -> {
-                            Toast.makeText(context, "Student Details Updated", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(context, role + " Details Updated", Toast.LENGTH_SHORT).show();
                             user.put("fullName", newName);
-                            user.put("regNo", newRegNo);
+                            if ("Student".equalsIgnoreCase(role)) {
+                                user.put("regNo", newRegNo);
+                            }
                             user.put("phone", newPhone);
                             notifyItemChanged(position);
                         })
                         .addOnFailureListener(e -> Toast.makeText(context, "Update Failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
             } else {
-                Toast.makeText(context, "Name and RegNo cannot be empty", Toast.LENGTH_SHORT).show();
+                Toast.makeText(context, "Name cannot be empty", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -206,7 +222,7 @@ public class StudentReportAdapter extends RecyclerView.Adapter<StudentReportAdap
     private void showResetDialog(Context context, String userId, String name) {
         new AlertDialog.Builder(context)
                 .setTitle("Reset Device Lock")
-                .setMessage("Reset device lock for " + name + "? This will allow the student to register on a new phone.")
+                .setMessage("Reset device lock for " + name + "? This will allow them to register on a new phone.")
                 .setPositiveButton("YES", (dialog, which) -> {
                     if (userId != null) {
                         fStore.collection("users").document(userId)
@@ -232,57 +248,51 @@ public class StudentReportAdapter extends RecyclerView.Adapter<StudentReportAdap
                 .show();
     }
 
-    public void calculateAttendance(Map<String, Object> user, String email, String course, String semester, TextView summaryView) {
-        if (course == null || semester == null) {
-            if (summaryView != null) summaryView.setText("No course/semester assigned.");
+    public void calculateAttendance(Map<String, Object> user, String email, String course, String sem, TextView view) {
+        if (course == null || sem == null) {
+            if (view != null) view.setText("No batch info");
             return;
         }
 
         fStore.collection("class_sessions")
                 .whereEqualTo("course", course)
-                .whereEqualTo("semester", semester)
+                .whereEqualTo("semester", sem)
                 .get()
-                .addOnSuccessListener(totalClassesSnapshot -> {
-                    Map<String, Integer> totalClassesPerSubject = new HashMap<>();
-                    for (DocumentSnapshot doc : totalClassesSnapshot.getDocuments()) {
+                .addOnSuccessListener(snapTotal -> {
+                    Map<String, Integer> totalMap = new HashMap<>();
+                    for (DocumentSnapshot doc : snapTotal.getDocuments()) {
                         String sub = doc.getString("subject");
-                        if (sub != null) {
-                            totalClassesPerSubject.put(sub, totalClassesPerSubject.getOrDefault(sub, 0) + 1);
-                        }
+                        if (sub != null) totalMap.put(sub, totalMap.getOrDefault(sub, 0) + 1);
                     }
 
-                    if (totalClassesPerSubject.isEmpty()) {
-                        String msg = "No classes held for this batch.";
-                        if (summaryView != null) summaryView.setText(msg);
-                        user.put("uiAttendanceString", msg);
+                    if (totalMap.isEmpty()) {
+                        String m = "No classes found";
+                        if (view != null) view.setText(m);
+                        user.put("uiAttendanceString", m);
                         return;
                     }
 
                     fStore.collection("attendance")
                             .whereEqualTo("studentEmail", email)
                             .get()
-                            .addOnSuccessListener(attendanceSnapshot -> {
-                                Map<String, Integer> attendedClassesPerSubject = new HashMap<>();
-                                for (DocumentSnapshot doc : attendanceSnapshot.getDocuments()) {
+                            .addOnSuccessListener(snapAtt -> {
+                                Map<String, Integer> attMap = new HashMap<>();
+                                for (DocumentSnapshot doc : snapAtt.getDocuments()) {
                                     String sub = doc.getString("subject");
-                                    if (sub != null) {
-                                        attendedClassesPerSubject.put(sub, attendedClassesPerSubject.getOrDefault(sub, 0) + 1);
-                                    }
+                                    if (sub != null) attMap.put(sub, attMap.getOrDefault(sub, 0) + 1);
                                 }
 
-                                StringBuilder summary = new StringBuilder();
-                                for (String subject : totalClassesPerSubject.keySet()) {
-                                    int total = totalClassesPerSubject.get(subject);
-                                    int attended = attendedClassesPerSubject.getOrDefault(subject, 0);
-                                    double percentage = ((double) attended / total) * 100;
-                                    
-                                    if (summary.length() > 0) summary.append(" | ");
-                                    summary.append(String.format(Locale.getDefault(), "%s: %d/%d (%.0f%%)", subject, attended, total, percentage));
+                                StringBuilder sb = new StringBuilder();
+                                for (String sub : totalMap.keySet()) {
+                                    int t = totalMap.get(sub);
+                                    int a = attMap.getOrDefault(sub, 0);
+                                    double p = ((double) a / t) * 100;
+                                    if (sb.length() > 0) sb.append(" | ");
+                                    sb.append(String.format(Locale.getDefault(), "%s: %d/%d (%.0f%%)", sub, a, t, p));
                                 }
-                                String finalSummary = summary.toString();
-                                if (summaryView != null) summaryView.setText(finalSummary);
-                                
-                                user.put("uiAttendanceString", finalSummary);
+                                String res = sb.toString();
+                                if (view != null) view.setText(res);
+                                user.put("uiAttendanceString", res);
                             });
                 });
     }

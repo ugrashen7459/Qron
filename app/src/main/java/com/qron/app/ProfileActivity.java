@@ -1,6 +1,7 @@
 package com.qron.app;
 
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -13,6 +14,7 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.FirebaseFirestore;
 
@@ -21,7 +23,7 @@ public class ProfileActivity extends AppCompatActivity {
     private static final String TAG = "ProfileDebug";
     TextView profileName, profileEmail, profilePhone, profileCourse, profileSemester, profileRegNo;
     LinearLayout layoutCourse, layoutSemester, layoutRegNo;
-    Button btnChangePassword;
+    Button btnChangePassword, btnLogout;
     ImageButton btnBack;
     FirebaseAuth fAuth;
     FirebaseFirestore fStore;
@@ -38,6 +40,7 @@ public class ProfileActivity extends AppCompatActivity {
         profileCourse = findViewById(R.id.profileCourse);
         profileSemester = findViewById(R.id.profileSemester);
         btnChangePassword = findViewById(R.id.btnChangePassword);
+        btnLogout = findViewById(R.id.btnLogout);
         
         layoutRegNo = findViewById(R.id.layoutRegNo);
         layoutCourse = findViewById(R.id.layoutCourse);
@@ -52,6 +55,14 @@ public class ProfileActivity extends AppCompatActivity {
         btnChangePassword.setOnClickListener(v -> {
             String email = profileEmail.getText().toString();
             showPasswordResetDialog(email);
+        });
+
+        btnLogout.setOnClickListener(v -> {
+            fAuth.signOut();
+            Intent intent = new Intent(ProfileActivity.this, Login.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(intent);
+            finish();
         });
 
         loadUserProfile();
@@ -71,7 +82,10 @@ public class ProfileActivity extends AppCompatActivity {
     }
 
     private void loadUserProfile() {
-        String userId = fAuth.getCurrentUser().getUid();
+        FirebaseUser currentUser = fAuth.getCurrentUser();
+        if (currentUser == null) return;
+        
+        String userId = currentUser.getUid();
         DocumentReference df = fStore.collection("users").document(userId);
         df.get().addOnSuccessListener(documentSnapshot -> {
             if (documentSnapshot.exists()) {

@@ -1,3 +1,34 @@
 <resources>
     <string name="app_name" translatable="false">Qron</string>
+    <string name="select_course">Select Course</string>
+    <string name="select_semester">Select Semester</string>
+    <string name="select_subject">Select Subject</string>
+    <string name="all_courses">All Courses</string>
+    <string name="all_semesters">All Semesters</string>
+    <string name="calculating_attendance">Calculating attendance...</string>
+    <string name="scan_attendance">Scan Attendance QR Code</string>
+    <string name="wrong_class">Wrong Class!</string>
+    <string name="qr_expired">QR Expired! Class ended.</string>
+    <string name="attendance_marked">Attendance Marked Successfully</string>
+    <string name="too_far">Status: Too Far</string>
+    <string name="welcome">Welcome</string>
+    <string name="profile_incomplete">Profile incomplete. Please contact Admin.</string>
+    <string name="gps_required">Could not get your location. Please ensure GPS is ON.</string>
+    <string name="waiting_gps">Waiting for GPS signal...</string>
+    <string name="sync_online">Data synced Online.</string>
+    <string name="sync_offline">Data will sync when online.</string>
+    <string name="attendance_already_marked">Attendance already marked for this session!</string>
+    <string name="invalid_qr">Invalid QR Code</string>
+    <string name="registered_successfully">Registered Successfully</string>
+    <string name="auth_failed">Authentication Failed</string>
+    <string name="syncing_progress">Syncing: %1$d/%2$d</string>
+    <string name="device_mismatch">Device mismatch! Use your registered phone.</string>
+    <string name="wrong_class_expected">Wrong Class! Expected: %1$s %2$s</string>
+    <string name="too_far_distance">Too far! Distance: %1$dm</string>
+    <string name="scan_error">Scan Error: %1$s</string>
+    <string name="dashboard_error">Dashboard Error: %1$s</string>
+    <string name="session_active">Session already active</string>
+    <string name="qr_gen_success">QR Generated successfully</string>
+    <string name="gen_offline">Generated offline</string>
+
 </resources>

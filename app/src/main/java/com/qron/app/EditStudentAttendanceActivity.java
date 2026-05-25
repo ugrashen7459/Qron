@@ -1,17 +1,15 @@
 package com.qron.app;
 
+import android.content.Intent;
 import android.os.Bundle;
-import android.text.InputType;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -21,13 +19,9 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 
 public class EditStudentAttendanceActivity extends AppCompatActivity {
 
@@ -62,7 +56,21 @@ public class EditStudentAttendanceActivity extends AppCompatActivity {
 
         fetchAttendance();
 
-        fabAddStudent.setOnClickListener(v -> showAddStudentDialog());
+        fabAddStudent.setOnClickListener(v -> {
+            Intent intent = new Intent(EditStudentAttendanceActivity.this, AddStudentToSessionActivity.class);
+            intent.putExtra("sessionId", sessionId);
+            intent.putExtra("subject", subject);
+            intent.putExtra("date", date);
+            intent.putExtra("course", course);
+            intent.putExtra("semester", semester);
+            startActivity(intent);
+        });
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        fetchAttendance();
     }
 
     private void fetchAttendance() {
@@ -78,85 +86,16 @@ public class EditStudentAttendanceActivity extends AppCompatActivity {
                                 doc.getString("regNo") != null ? doc.getString("regNo") : doc.getString("studentEmail")
                         ));
                     }
+                    
+                    // Sort locally by registration number
+                    Collections.sort(studentList, (s1, s2) -> {
+                        if (s1.regNo == null) return 1;
+                        if (s2.regNo == null) return -1;
+                        return s1.regNo.compareTo(s2.regNo);
+                    });
+
                     adapter.notifyDataSetChanged();
                 });
-    }
-
-    private void showAddStudentDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Add Student to Session");
-
-        final EditText input = new EditText(this);
-        input.setHint("Enter Registration Number");
-        input.setInputType(InputType.TYPE_CLASS_TEXT);
-        builder.setView(input);
-
-        builder.setPositiveButton("Search & Add", (dialog, which) -> {
-            String regNo = input.getText().toString().trim();
-            if (!regNo.isEmpty()) {
-                searchAndAddStudent(regNo);
-            }
-        });
-        builder.setNegativeButton("Cancel", null);
-        builder.show();
-    }
-
-    private void searchAndAddStudent(String regNo) {
-        fStore.collection("users")
-                .whereEqualTo("regNo", regNo)
-                .whereEqualTo("role", "Student")
-                .get()
-                .addOnSuccessListener(snapshots -> {
-                    if (!snapshots.isEmpty()) {
-                        DocumentSnapshot userDoc = snapshots.getDocuments().get(0);
-                        String studentName = userDoc.getString("fullName");
-                        String studentEmail = userDoc.getString("email");
-                        String studentId = userDoc.getId();
-
-                        // Check if already present
-                        fStore.collection("attendance")
-                                .whereEqualTo("sessionId", sessionId)
-                                .whereEqualTo("studentId", studentId)
-                                .get()
-                                .addOnSuccessListener(attendanceSnapshots -> {
-                                    if (attendanceSnapshots.isEmpty()) {
-                                        markPresent(studentId, studentName, studentEmail, regNo);
-                                    } else {
-                                        Toast.makeText(this, "Student already marked present", Toast.LENGTH_SHORT).show();
-                                    }
-                                });
-                    } else {
-                        Toast.makeText(this, "Student not found!", Toast.LENGTH_SHORT).show();
-                    }
-                });
-    }
-
-    private void markPresent(String studentId, String name, String email, String regNo) {
-        long timestamp = System.currentTimeMillis();
-        String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date(timestamp));
-
-        Map<String, Object> att = new HashMap<>();
-        att.put("studentName", name);
-        att.put("studentId", studentId);
-        att.put("studentEmail", email);
-        att.put("regNo", regNo);
-        att.put("subject", subject);
-        att.put("course", course);
-        att.put("semester", semester);
-        att.put("sessionId", sessionId);
-        att.put("date", date);
-        att.put("time", time);
-        att.put("timestamp", timestamp);
-        att.put("status", "Present");
-
-        fStore.collection("attendance").add(att).addOnSuccessListener(documentReference -> {
-            Toast.makeText(this, name + " marked Present", Toast.LENGTH_SHORT).show();
-            
-            String adminEmail = FirebaseAuth.getInstance().getCurrentUser() != null ? FirebaseAuth.getInstance().getCurrentUser().getEmail() : "Unknown";
-            SheetLogger.logToSheet(adminEmail, "Edit Attendance", "Added student " + name + " (" + regNo + ") to session " + sessionId);
-            
-            fetchAttendance();
-        });
     }
 
     private class AttendanceRecord {

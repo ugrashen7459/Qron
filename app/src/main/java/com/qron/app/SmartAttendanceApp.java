@@ -14,9 +14,10 @@ public class SmartAttendanceApp extends Application {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
 
         try {
-            // Explicitly use the URL from your google-services.json
-            FirebaseDatabase database = FirebaseDatabase.getInstance("https://smartattendance-e0cc2-default-rtdb.firebaseio.com");
+            // Use default instance to ensure consistency across activities
+            FirebaseDatabase database = FirebaseDatabase.getInstance();
             database.setPersistenceEnabled(true);
+            // Keep connection status path synced
             database.getReference(".info/connected").keepSynced(true);
         } catch (Exception e) {
             Log.e("SmartAttendanceApp", "RTDB initialization error: " + e.getMessage());

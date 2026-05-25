@@ -131,29 +131,21 @@ public class ViewStudentsActivity extends AppCompatActivity {
             boolean matchesSearch = name.contains(query) || regNo.contains(query);
 
             if (matchesCourse && matchesSemester && matchesSearch) {
-                String attendanceString = (String) student.get("uiAttendanceString");
-                
-                if (attendanceString != null && !attendanceString.isEmpty() && !attendanceString.equals("Calculating attendance...")) {
-                    Pattern pattern = Pattern.compile("\\((\\d+)%\\)");
-                    Matcher matcher = pattern.matcher(attendanceString);
+                    Map<String, Double> subjectPercentages = (Map<String, Double>) student.get("subjectPercentages");
                     
-                    boolean isDefaulter = false;
-                    while (matcher.find()) {
-                        try {
-                            int foundPercentage = Integer.parseInt(matcher.group(1));
-                            if (foundPercentage < cutoff) {
+                    if (subjectPercentages != null && !subjectPercentages.isEmpty()) {
+                        boolean isDefaulter = false;
+                        for (Double percent : subjectPercentages.values()) {
+                            if (percent < cutoff) {
                                 isDefaulter = true;
                                 break;
                             }
-                        } catch (NumberFormatException e) {
-                            Log.e(TAG, "Error parsing percentage", e);
+                        }
+                        
+                        if (isDefaulter) {
+                            defaulterList.add(student);
                         }
                     }
-                    
-                    if (isDefaulter) {
-                        defaulterList.add(student);
-                    }
-                }
             }
         }
         
@@ -232,6 +224,7 @@ public class ViewStudentsActivity extends AppCompatActivity {
     private void fetchStudents() {
         fStore.collection("users")
                 .whereEqualTo("role", "Student")
+                .limit(20) // Implementation of Pagination to save Firebase reads
                 .get()
                 .addOnSuccessListener(queryDocumentSnapshots -> {
                     allStudentsList.clear();

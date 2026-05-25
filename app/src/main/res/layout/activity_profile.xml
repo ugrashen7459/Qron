@@ -192,6 +192,14 @@
                 android:text="Change Password"
                 android:textColor="@color/colorPrimary" />
 
+            <Button
+                android:id="@+id/btnLogout"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Logout"
+                android:textColor="#FF5252" />
+
         </LinearLayout>
     </androidx.cardview.widget.CardView>
 

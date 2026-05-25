@@ -51,102 +51,74 @@ public class Login extends AppCompatActivity {
         fAuth = FirebaseAuth.getInstance();
         fStore = FirebaseFirestore.getInstance();
 
-        loginBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                String email = loginEmail.getText().toString().trim();
-                String password = loginPassword.getText().toString().trim();
+        loginBtn.setOnClickListener(v -> {
+            String email = loginEmail.getText().toString().trim();
+            String password = loginPassword.getText().toString().trim();
 
-                if (TextUtils.isEmpty(email)) {
-                    loginEmail.setError("Email is required.");
-                    return;
-                }
-
-                if (TextUtils.isEmpty(password)) {
-                    loginPassword.setError("Password is required.");
-                    return;
-                }
-
-                progressBar.setVisibility(View.VISIBLE);
-
-                // Authenticate User
-                fAuth.signInWithEmailAndPassword(email, password).addOnSuccessListener(new OnSuccessListener<AuthResult>() {
-                    @Override
-                    public void onSuccess(AuthResult authResult) {
-                        checkUserRole(authResult.getUser().getUid());
-                    }
-                }).addOnFailureListener(new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
-                        Toast.makeText(Login.this, "Error! " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                        progressBar.setVisibility(View.GONE);
-                    }
-                });
+            if (TextUtils.isEmpty(email)) {
+                loginEmail.setError("Email is required.");
+                return;
             }
+
+            if (TextUtils.isEmpty(password)) {
+                loginPassword.setError("Password is required.");
+                return;
+            }
+
+            progressBar.setVisibility(View.VISIBLE);
+
+            fAuth.signInWithEmailAndPassword(email, password)
+                .addOnSuccessListener(result -> checkUserRole(result.getUser().getUid()))
+                .addOnFailureListener(e -> {
+                    Toast.makeText(Login.this, "Error! " + e.getLocalizedMessage(), Toast.LENGTH_SHORT).show();
+                    progressBar.setVisibility(View.GONE);
+                });
         });
     }
 
     private void checkUserRole(String uid) {
         progressBar.setVisibility(View.VISIBLE);
-        DocumentReference df = fStore.collection("users").document(uid);
-        df.get().addOnSuccessListener(new OnSuccessListener<DocumentSnapshot>() {
-            @Override
-            public void onSuccess(DocumentSnapshot documentSnapshot) {
-                if (documentSnapshot.exists()) {
-                    String role = documentSnapshot.getString("role");
-                    String storedDeviceId = documentSnapshot.getString("deviceId");
-                    String currentDeviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+        DocumentReference dr = fStore.collection("users").document(uid);
+        dr.get().addOnSuccessListener(doc -> {
+            if (doc.exists()) {
+                String role = doc.getString("role");
+                String devId = doc.getString("deviceId");
+                String currentId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
 
-                    if (role != null) {
-                        // Device Lock Feature for Students
-                        if (role.equals("Student")) {
-                            if (storedDeviceId == null || storedDeviceId.isEmpty()) {
-                                // Case A: First Time Login - Register device
-                                df.update("deviceId", currentDeviceId);
-                            } else if (!storedDeviceId.equals(currentDeviceId)) {
-                                // Case C: Different Device - Block Login
-                                Toast.makeText(Login.this, "Login Failed! You are registered on another device. Please use your own phone.", Toast.LENGTH_LONG).show();
-                                fAuth.signOut();
-                                progressBar.setVisibility(View.GONE);
-                                return;
-                            }
-                            // Case B: Same Device - Allow Login (fall through to dashboard)
-                        }
-
-                        String email = fAuth.getCurrentUser() != null ? fAuth.getCurrentUser().getEmail() : "Unknown";
-                        if (role.equals("Admin")) {
-                            SheetLogger.logToSheet(email, "Login", "Admin logged in");
-                        }
-
-                        Intent intent;
-                        if (role.equals("Admin")) {
-                            intent = new Intent(getApplicationContext(), AdminDashboard.class);
-                        } else if (role.equals("Teacher")) {
-                            intent = new Intent(getApplicationContext(), TeacherDashboard.class);
-                        } else if (role.equals("Student")) {
-                            intent = new Intent(getApplicationContext(), StudentDashboard.class);
-                        } else {
-                            Toast.makeText(Login.this, "Unknown role: " + role, Toast.LENGTH_SHORT).show();
+                if (role != null) {
+                    if ("Student".equals(role)) {
+                        if (TextUtils.isEmpty(devId)) {
+                            dr.update("deviceId", currentId);
+                        } else if (!devId.equals(currentId)) {
+                            Toast.makeText(Login.this, getString(R.string.device_mismatch), Toast.LENGTH_LONG).show();
+                            fAuth.signOut();
                             progressBar.setVisibility(View.GONE);
                             return;
                         }
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                        startActivity(intent);
-                        finish();
-                    } else {
-                        Toast.makeText(Login.this, "Role field missing", Toast.LENGTH_SHORT).show();
                     }
-                } else {
-                    Toast.makeText(Login.this, "User document does not exist", Toast.LENGTH_SHORT).show();
+
+                    String email = fAuth.getCurrentUser() != null ? fAuth.getCurrentUser().getEmail() : "Unknown";
+                    if ("Admin".equals(role)) SheetLogger.logToSheet(email, "Login", "Admin logged in");
+
+                    Intent intent;
+                    switch (role) {
+                        case "Admin": intent = new Intent(this, AdminDashboard.class); break;
+                        case "Teacher": intent = new Intent(this, TeacherDashboard.class); break;
+                        case "Student": intent = new Intent(this, StudentDashboard.class); break;
+                        default:
+                            Toast.makeText(this, "Unknown role: " + role, Toast.LENGTH_SHORT).show();
+                            progressBar.setVisibility(View.GONE);
+                            return;
+                    }
+                    intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                    startActivity(intent);
+                    finish();
                 }
-                progressBar.setVisibility(View.GONE);
             }
-        }).addOnFailureListener(new OnFailureListener() {
-            @Override
-            public void onFailure(@NonNull Exception e) {
-                Toast.makeText(Login.this, "Failed to fetch user role: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                progressBar.setVisibility(View.GONE);
-            }
+            progressBar.setVisibility(View.GONE);
+        }).addOnFailureListener(e -> {
+            Toast.makeText(this, "Failed: " + e.getLocalizedMessage(), Toast.LENGTH_SHORT).show();
+            progressBar.setVisibility(View.GONE);
         });
     }
 }
